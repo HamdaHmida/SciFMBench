@@ -1,0 +1,12 @@
+# Core ML deps — required to actually run any adapter.
+torch>=2.0
+einops>=0.7
+timm>=0.9
+
+# Config loading — PyYAML is required to load the .yaml config shipped
+# under configs/. The loader falls back to JSON if PyYAML is missing,
+# but the upstream MPP config is YAML so install this in practice.
+PyYAML>=6.0
+
+# Utilities
+numpy>=1.23
