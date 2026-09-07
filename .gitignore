@@ -1,0 +1,50 @@
+# --- Model weights / checkpoints ---
+# GitHub rejects files >100 MB. Model checkpoints routinely exceed that.
+# Convention: weights live OUTSIDE the repo, in a sibling folder
+# (e.g. ../weights/<model_name>.pt relative to this repo's root).
+# Callers pass --weights /path/to/ckpt.tar when running the CLI.
+#
+# If a weights/ folder ever appears inside the repo, it should be ignored.
+/weights/
+**/weights/
+
+# --- Datasets / raw data files ---
+# Same rationale as weights — GitHub rejects large files, and PDEBench
+# HDF5 datasets routinely exceed that. Convention: datasets live OUTSIDE
+# the repo, in a sibling folder (e.g. ../datasets/PDEBench/...).
+# The repo's data/ Python package (data loaders, synthetic) is unrelated.
+/datasets/
+**/datasets/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+
+# --- IDE / editor ---
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# --- Logs / outputs ---
+logs/
+*.log
+wandb/
+checkpoints/
+outputs/
+runs/
+
+# --- Test / scratch ---
+.pytest_cache/
+.coverage
+htmlcov/

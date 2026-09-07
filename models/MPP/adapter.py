@@ -90,9 +90,11 @@ class MPPAdapter(BaseModel):
         supported_modes=[Mode.FROM_SCRATCH, Mode.FINETUNE, Mode.ZERO_SHOT],
         default_mode=Mode.FINETUNE,  # the model ships `expand_projections` — finetune is its strength
         # Native layouts (documented so the evaluator knows what to canonicalize).
-        native_input_layout="(T, B, C, H, W) float32 — time window of length T",
-        native_output_layout="(B, C, H, W) float32 — only the last predicted step",
-        # MPP normalizes internally (per-sample over T, H, W) and denormalizes
+        native_input_layout="(T, B, C, Nx, Ny) float32 — time window of length T",
+        native_output_layout="(B, C, Nx, Ny) float32 — only the last predicted step",
+        # Framework canonical layout (the contract every adapter maps to):
+        canonical_layout="(B, Nx, Ny, T, C) float32",
+        # MPP normalizes internally (per-sample over T, Nx, Ny) and denormalizes
         # before returning — so native output is already in input units.
         upstream_version="vendored-0.1",
         paper=None,
@@ -133,42 +135,66 @@ class MPPAdapter(BaseModel):
         `__main__` example values (T=10, bs=4, labels=[0,1]) so the adapter
         is callable in isolation. Real evaluation must call
         `set_inference_context()` first.
+
+        The vendored `SubsampledLinear.forward` does `labels = labels[0]`
+        then `len(labels)`, so the upstream expects `labels` to be a
+        *list of label-lists* — one per batch element. We accept the
+        flatter "channel-list" form (e.g. `[0, 1]`) and replicate it
+        across the batch here, so callers can set the labels once and
+        not worry about batch size.
         """
-        labels = self._state_labels if self._state_labels is not None else [0, 1]
-        bcs = self._bcs if self._bcs is not None else torch.zeros(1, 2, dtype=torch.long, device=x.device)
+        # Determine batch size from the input. Native x is (T, B, C, Nx, Ny).
+        B = x.shape[1] if x.ndim >= 2 else 1
+        flat_labels = self._state_labels if self._state_labels is not None else [0, 1]
+        labels = [list(flat_labels) for _ in range(B)]
+        bcs = self._bcs if self._bcs is not None else torch.zeros(B, 2, dtype=torch.long, device=x.device)
         return self._native(x, labels, bcs)
 
     # --- Canonicalization (used by the evaluator) -------------------------
+    #
+    # Layout contract (set by the framework, not by MPP):
+    #     canonical = (B, Nx, Ny, T, C) float32
+    #     MPP native = (T, B, C, Nx, Ny) float32 (input window)
+    #                  (B, C, Nx, Ny) float32 (single-step output)
+    #
+    # `to_canonical` is called on MPP's last-step prediction only.
+    # `from_canonical` is called by the evaluator when feeding a canonical
+    # window into MPP — T is preserved (MPP is auto-regressive over a window).
 
     def to_canonical(self, y_native: Tensor) -> CanonicalSample:
-        """Wrap native (B, C, H, W) output as a CanonicalSample.
+        """Convert MPP's native single-step output into a CanonicalSample.
 
-        The final canonical layout (channels=vx/vy/p/vorticity convention,
-        dtype, normalization) is finalized in task #1. For now: pass-through
-        with provenance metadata so the evaluator can audit it.
+        Permutes (B, C, Nx, Ny) -> (B, Nx, Ny, C), then adds a singleton
+        time axis at position 3 so the result has the canonical
+        (B, Nx, Ny, T=1, C) layout.
         """
+        if y_native.ndim != 4:
+            raise ValueError(
+                f"MPPAdapter.to_canonical expects (B, C, Nx, Ny); got {tuple(y_native.shape)}"
+            )
+        # (B, C, Nx, Ny) -> (B, Nx, Ny, C) -> (B, Nx, Ny, T=1, C)
+        y_canon = y_native.permute(0, 2, 3, 1).unsqueeze(3)
         return CanonicalSample(
-            fields=y_native,
+            fields=y_canon.contiguous(),
             metadata={
                 "source": "MPP",
                 "layout": "single_step",
-                # MPP already denormalizes internally; record that fact so the
-                # evaluator doesn't double-apply normalization.
-                "already_in_input_units": True,
+                "already_in_input_units": True,  # MPP denormalizes internally
             },
         )
 
     def from_canonical(self, sample: CanonicalSample) -> Tensor:
-        """Pull the canonical tensor back out as a native input.
-
-        The upstream model expects (T, B, C, H, W). If the canonical sample
-        is single-step (B, C, H, W), we add a T axis of length 1 here.
-        Final canonical-vs-native axis mapping is locked in by task #1.
+        """Inverse: convert a canonical (B, Nx, Ny, T, C) window to MPP's
+        native (T, B, C, Nx, Ny) input layout.
         """
         x = sample.fields
-        if x.ndim == 4:  # (B, C, H, W) -> (T=1, B, C, H, W)
-            x = x.unsqueeze(0)
-        return x
+        if x.ndim != 5:
+            raise ValueError(
+                f"MPPAdapter.from_canonical expects (B, Nx, Ny, T, C); "
+                f"got {tuple(x.shape)}"
+            )
+        # (B, Nx, Ny, T, C) -> (T, B, C, Nx, Ny)
+        return x.permute(3, 0, 4, 1, 2).contiguous()
 
     # --- Weights ----------------------------------------------------------
 
@@ -259,7 +285,13 @@ class MPPAdapter(BaseModel):
                 target = target.to(device)
 
                 # Roll the prediction: MPP predicts the next step from a window.
-                pred = self._native(window, self._state_labels or [0, 1], self._bcs or torch.zeros(1, 2, dtype=torch.long, device=device))
+                # Use `is None` (not `or`) for the bcs tensor — `tensor or ...`
+                # is illegal in PyTorch because it calls __bool__ on each element.
+                b = window.shape[1] if window.ndim >= 2 else 1
+                flat_labels = self._state_labels if self._state_labels is not None else [0, 1]
+                labels = [list(flat_labels) for _ in range(b)]
+                bcs = self._bcs if self._bcs is not None else torch.zeros(b, 2, dtype=torch.long, device=device)
+                pred = self._native(window, labels, bcs)
                 loss = loss_fn(pred, target[-1] if target.ndim == 5 else target)
                 optim.zero_grad()
                 loss.backward()

@@ -51,6 +51,10 @@ class ModelMetadata:
     # Documented here so the evaluator knows when to canonicalize.
     native_input_layout: str = "auto"
     native_output_layout: str = "auto"
+    # Framework-canonical layout the adapter maps into via to_canonical /
+    # out of via from_canonical. Convention for fluid dynamics:
+    #   (B, Nx, Ny, T, C) float32
+    canonical_layout: str = "(B, Nx, Ny, T, C) float32"
     # Optional: upstream commit/tag this adapter was tested against.
     upstream_version: Optional[str] = None
     paper: Optional[str] = None
@@ -209,14 +213,26 @@ class BaseModel(ABC):
 class CanonicalSample:
     """Framework-canonical representation of a fluid-dynamics sample.
 
-    The shape and field set are deliberately minimal here — task #1
-    (canonical Sample schema) will refine this. For now, a single tensor
-    plus named channels is enough for the ABC to compile.
+    Layout (the framework's contract for fluid dynamics):
+
+        fields : (B, Nx, Ny, T, C) float32
+
+    where:
+        B   = batch size
+        Nx  = number of grid points along x (a.k.a. H in some upstream code)
+        Ny  = number of grid points along y (a.k.a. W in some upstream code)
+        T   = time window length (number of consecutive timesteps)
+        C   = number of physical state channels (e.g. vx, vy, pressure, density)
+
+    This is a permutation of the typical upstream native format
+    `(T, B, C, Nx, Ny)` — see `models/MPP/adapter.py` for the example
+    conversion. Adapters map into and out of this layout via
+    `to_canonical` / `from_canonical`.
     """
 
-    fields: Tensor  # canonical-dtype tensor, layout to be finalized
-    coords: Optional[Tensor] = None  # optional spatial coordinates
-    time: Optional[Tensor] = None  # optional time axis
+    fields: Tensor  # (B, Nx, Ny, T, C) float32
+    coords: Optional[Tensor] = None  # optional spatial coordinates, e.g. (Nx, Ny, 2)
+    time: Optional[Tensor] = None  # optional time stamps, e.g. (T,)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 

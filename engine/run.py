@@ -151,7 +151,7 @@ def _translate_cfg(upstream: Dict[str, Any]) -> Dict[str, Any]:
         out_run["embedding_offset"] = int(upstream["embedding_offset"])
 
     # Synthetic-shape knobs (used only when no real data is wired up yet).
-    for k, key in (("C", "C"), ("H", "H"), ("W", "W"), ("n_samples", "n_samples")):
+    for k, key in (("C", "C"), ("Nx", "Nx"), ("Ny", "Ny"), ("n_samples", "n_samples")):
         if k in upstream:
             out_run[key] = int(upstream[k])
 
@@ -179,8 +179,8 @@ def run_train(model, run_cfg: Dict[str, Any], weights: Optional[str], mode_label
     T = int(run_cfg.get("T", 10))
     state_labels = run_cfg.get("state_labels") or list(range(int(run_cfg.get("C", 3))))
     C = max(int(run_cfg.get("C", 3)), max(state_labels, default=-1) + 1)
-    H = int(run_cfg.get("H", 64))
-    W = int(run_cfg.get("W", 64))
+    Nx = int(run_cfg.get("Nx", 64))
+    Ny = int(run_cfg.get("Ny", 64))
     n_samples = int(run_cfg.get("n_samples", 8))
     batch_size = int(run_cfg.get("batch_size", 2))
 
@@ -191,7 +191,8 @@ def run_train(model, run_cfg: Dict[str, Any], weights: Optional[str], mode_label
         )
 
     loader = make_synthetic_loader(
-        n_samples=n_samples, T=T, C=C, H=H, W=W, batch_size=batch_size, seed=run_cfg.get("seed", 0)
+        n_samples=n_samples, T=T, C=C, Nx=Nx, Ny=Ny,
+        batch_size=batch_size, seed=run_cfg.get("seed", 0),
     )
 
     train_cfg = {
@@ -207,7 +208,8 @@ def run_train(model, run_cfg: Dict[str, Any], weights: Optional[str], mode_label
     print(f"model        : {model.metadata.name}")
     print(f"epochs       : {train_cfg['epochs']}")
     print(f"lr           : {train_cfg['lr']}")
-    print(f"window shape : (T={T}, B={batch_size}, C={C}, H={H}, W={W})")
+    print(f"window shape : (T={T}, B={batch_size}, C={C}, Nx={Nx}, Ny={Ny})   [native]")
+    print(f"canonical    : (B, Nx={Nx}, Ny={Ny}, T={T}, C={C})")
     print(f"state_labels : {state_labels}")
 
     result = model.train(train_dataset=loader, val_dataset=None, cfg=train_cfg, callbacks=None)
@@ -236,8 +238,8 @@ def run_test(model, run_cfg: Dict[str, Any], weights: Optional[str], ckpt_from_c
     T = int(run_cfg.get("T", 10))
     state_labels = run_cfg.get("state_labels") or list(range(int(run_cfg.get("C", 3))))
     C = max(int(run_cfg.get("C", 3)), max(state_labels, default=-1) + 1)
-    H = int(run_cfg.get("H", 64))
-    W = int(run_cfg.get("W", 64))
+    Nx = int(run_cfg.get("Nx", 64))
+    Ny = int(run_cfg.get("Ny", 64))
     n_batches = int(run_cfg.get("test_batches", 3))
 
     if hasattr(model, "set_inference_context"):
@@ -247,13 +249,15 @@ def run_test(model, run_cfg: Dict[str, Any], weights: Optional[str], ckpt_from_c
         )
 
     loader = make_synthetic_loader(
-        n_samples=n_batches * 2, T=T, C=C, H=H, W=W, batch_size=1, seed=run_cfg.get("seed", 0)
+        n_samples=n_batches * 2, T=T, C=C, Nx=Nx, Ny=Ny,
+        batch_size=1, seed=run_cfg.get("seed", 0),
     )
 
     _print_section("TEST (zero-shot)")
     print(f"model        : {model.metadata.name}")
     print(f"batches      : {n_batches}")
-    print(f"window shape : (T={T}, B=1, C={C}, H={H}, W={W})")
+    print(f"window shape : (T={T}, B=1, C={C}, Nx={Nx}, Ny={Ny})   [native]")
+    print(f"canonical    : (B=1, Nx={Nx}, Ny={Ny}, T={T}, C={C})")
     print(f"state_labels : {state_labels}")
 
     device = torch.device(run_cfg.get("device", "cpu"))

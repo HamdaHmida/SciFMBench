@@ -41,6 +41,26 @@ to maintain.
 - **Evaluation** is canonical — shared splits, shared normalization, shared
   metrics — so differences in results reflect the model, not the wrapper.
 
+**Canonical data format (the framework's contract for fluid dynamics):**
+
+```
+canonical = (B, Nx, Ny, T, C) float32
+```
+
+| Axis | Meaning |
+|---|---|
+| `B`  | batch size |
+| `Nx` | grid points along x |
+| `Ny` | grid points along y |
+| `T`  | time-window length |
+| `C`  | physical state channels (e.g. vx, vy, pressure, density) |
+
+Each adapter implements `to_canonical` / `from_canonical` to translate
+between its model's native layout and this canonical form. The canonical
+form is a pure permutation of typical upstream formats: e.g. MPP's
+native `(T, B, C, Nx, Ny)` becomes `(B, Nx, Ny, T, C)` via
+`permute(1, 3, 4, 0, 2)`.
+
 ---
 
 ## Install
@@ -50,14 +70,14 @@ to maintain.
 git clone <this-repo> && cd SciFMBench
 
 # 2. (Recommended) create a fresh environment
-python -m venv .venv && source .venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate
 
 # 3. Install dependencies
 pip install -r requirements.txt
 ```
 
 > The framework imports are lazy for `torch` and `numpy` in utility modules, so
-> `python -m engine.run --list-models` works even before installing deps.
+> `python3 -m engine.run --list-models` works even before installing deps.
 > Anything that actually builds or runs a model requires `torch`.
 
 ---
@@ -67,13 +87,13 @@ pip install -r requirements.txt
 ### List registered models
 
 ```bash
-python -m engine.run --list-models
+python3 -m engine.run --list-models
 ```
 
 ### Train from scratch (uses `basic_config` section by default)
 
 ```bash
-python -m engine.run \
+python3 -m engine.run \
     --model MPP \
     --mode train \
     --config configs/models/mpp_avit_s_config.yaml
@@ -82,27 +102,27 @@ python -m engine.run \
 ### Finetune (uses `finetune` section; loads `pretrained_ckpt_path`)
 
 ```bash
-python -m engine.run \
+python3 -m engine.run \
     --model MPP \
     --mode finetune \
     --config configs/models/mpp_avit_s_config.yaml \
-    --weights /path/to/ckpt.tar
+    --weights ../weights/mpp_finetune.pt
 ```
 
 ### Zero-shot eval
 
 ```bash
-python -m engine.run \
+python3 -m engine.run \
     --model MPP \
     --mode test \
     --config configs/models/mpp_avit_s_config.yaml \
-    --weights /path/to/ckpt.tar
+    --weights ../weights/mpp_pretrained.tar
 ```
 
 ### Pick a config section explicitly
 
 ```bash
-python -m engine.run --model MPP --mode train \
+python3 -m engine.run --model MPP --mode train \
     --config configs/models/mpp_avit_s_config.yaml \
     --section frozen          # or basic_config | finetune | less_frozen
 ```
@@ -110,13 +130,34 @@ python -m engine.run --model MPP --mode train \
 Or let the CLI pick by inspecting the section's `pretrained` flag:
 
 ```bash
-python -m engine.run --model MPP --mode finetune \
+python3 -m engine.run --model MPP --mode finetune \
     --config configs/models/mpp_avit_s_config.yaml \
     --auto-section
 ```
 
 The script also accepts JSON configs (the loader falls back when PyYAML is
 unavailable).
+
+### Smoke-test a model before a real run
+
+Before launching a full training run, you can quickly verify that a model is
+wired up correctly. `engine/test_models.py` generates random canonical data
+of shape `(16, 128, 128, 20, 2)`, runs 1 training epoch over a `DataLoader`
+with `batch_size=4`, and reports PASS / FAIL on:
+
+- model builds without error
+- forward output shape matches the expected native output
+- `to_canonical` / `from_canonical` round-trip cleanly
+- training loop completes
+- losses are finite and in a sane range
+- gradients are flowing (loss isn't collapsed or exploded)
+
+```bash
+python3 -m engine.test_models --model MPP
+python3 -m engine.test_models --list-models
+```
+
+Exit code is 0 on PASS, 1 on FAIL — useful for CI / pre-flight checks.
 
 ---
 
@@ -173,7 +214,7 @@ SciFMBench/
    - `train(...)` — call the upstream training script.
 3. Decorate the adapter with `@register` (already imported by
    `models/<name>/__init__.py`).
-4. The model now appears in `python -m engine.run --list-models`.
+4. The model now appears in `python3 -m engine.run --list-models`.
 
 The framework never edits vendored code. Updates flow through by re-syncing
 the upstream folder.
@@ -187,6 +228,7 @@ the upstream folder.
 | BaseModel ABC + adapter protocol | ✅ done |
 | First adapter (MPP / Axial ViT for PDE) | ✅ done |
 | CLI training / eval script | ✅ done — supports train / finetune / test, MPP YAML format |
+| Smoke-test script (`engine/test_models.py`) | ✅ done |
 | Canonical Sample schema for fluid dynamics | ⏳ next |
 | Real dataset loader (PDEBench paths from the config) | ⏳ pending |
 | Evaluation / benchmark layer (canonical eval) | ⏳ pending |
@@ -197,6 +239,63 @@ be smoke-tested without a real PDEBench install. To exercise the upstream
 data paths in `configs/models/mpp_avit_s_config.yaml` (PDEBench 2D shallow-water,
 incompressible NS, compressible NS, diffusion-reaction), the dataset loader
 (task #5) needs to land first.
+
+---
+
+## Weights
+
+Model checkpoints are **not** stored in the repo — GitHub rejects files over
+100 MB, and SciFM weights routinely exceed that. The convention is:
+
+```
+<parent>/                # e.g. /home/hamda/PhD_Thesis/
+├── SciFMBench/          # the repo
+└── weights/             # checkpoints live here, sibling of the repo
+    ├── mpp_finetune.pt
+    └── mpp_pretrained.tar
+```
+
+From inside the repo, point `--weights` at the sibling folder:
+
+```bash
+python3 -m engine.run --model MPP --mode test \
+    --config configs/models/mpp_avit_s_config.yaml \
+    --weights ../weights/mpp_pretrained.tar
+```
+
+The repo's `.gitignore` excludes any in-repo `weights/` folder so a stray
+local copy doesn't sneak into a commit. The `weights/` directory itself ships
+with a `README.md` describing the convention.
+
+---
+
+## Datasets
+
+Raw dataset files follow the same rule as weights — they live in a sibling
+folder, not in the repo. GitHub rejects large files, and PDEBench HDF5
+files routinely exceed that.
+
+```
+<parent>/                # e.g. /home/hamda/PhD_Thesis/
+├── SciFMBench/          # the repo
+├── weights/             # checkpoints
+└── datasets/            # raw dataset files live here
+    └── PDEBench/
+        └── 2D/
+            ├── shallow-water/
+            ├── NS_incom/
+            ├── CFD/
+            └── diffusion-reaction/
+```
+
+The MPP config (`configs/models/mpp_avit_s_config.yaml`) already points
+`train_data_paths` and `valid_data_paths` at `../datasets/PDEBench/...`.
+You just need to drop the actual HDF5 files into the matching subfolders.
+
+> **The `data/` Python package inside the repo is unrelated.** That's
+> framework code (data loaders, transforms, the synthetic smoke-test
+> generator). It stays in the repo. The external `datasets/` folder is
+> only for raw data files.
 
 ---
 
