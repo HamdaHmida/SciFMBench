@@ -5,9 +5,9 @@ import numpy as np
 from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
 from typing import Union, Tuple, List, Optional
-from libs.positional_encoding_module import RotaryEmbedding, apply_rotary_pos_emb, SirenNet
-from libs.basics import PreNorm, PostNorm, GeAct, MLP, masked_instance_norm, GroupNorm, InstanceNorm
-from libs.attention import LowRankKernel
+from .positional_encoding_module import RotaryEmbedding, apply_rotary_pos_emb, SirenNet
+from .basics import PreNorm, PostNorm, GeAct, MLP, masked_instance_norm, GroupNorm, InstanceNorm
+from .attention import LowRankKernel
 
 
 class PoolingReducer(nn.Module):

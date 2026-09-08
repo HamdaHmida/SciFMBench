@@ -84,6 +84,9 @@ _CANON_SHAPE_OVERRIDES: Dict[str, Dict[str, int]] = {
     # (B, C, kernel_size^2, H*W) which at 128x128 is ~32M elements
     # per timestep. Reduce spatial dims for the smoke test.
     "KANConv": {"B": 4, "Nx": 32, "Ny": 32, "T": 4, "C": 2},
+    # FactFormer uses factorized attention; default shape works fine
+    # but we use smaller dims to keep the test fast.
+    "FactFormer": {"B": 4, "Nx": 32, "Ny": 32, "T": 4, "C": 2},
 }
 
 
@@ -137,6 +140,20 @@ _DEFAULT_CFG: Dict[str, Dict[str, Any]] = {
         "grid_size": 5,
         "spline_order": 3,
         "base_activation": "SiLU",
+    },
+    "FactFormer": {
+        # Small config for smoke test. The adapter takes a (T, B, C, Nx, Ny)
+        # window and applies FABlock2D to the last timestep.
+        # Note: use_rope=False works around a vendored shape mismatch in
+        # LowRankKernel pos_dim=1 rotary branch (expects 3D tensor, gets 4D).
+        "dim": 2,                # input channels (matches C)
+        "dim_head": 16,
+        "latent_dim": 16,
+        "heads": 2,
+        "dim_out": 2,            # output channels (matches C)
+        "use_rope": False,       # positional encoding: 'none'
+        "kernel_multiplier": 3,
+        "scaling_factor": 1.0,
     },
     "my_model": {},  # the placeholder adapter is small enough that defaults suffice
 }
@@ -402,7 +419,9 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--channels", type=int, default=CANON_C,
                    help=f"Number of channels in the synthetic data (default: {CANON_C}).")
     p.add_argument("--list-models", action="store_true",
-                   help="Print the registry and exit.")
+                   help="Print all registered models and exit.")
+    p.add_argument("--list-passing", action="store_true",
+                   help="Run smoke test on all registered models and list only those that PASS.")
     return p.parse_args()
 
 
@@ -421,16 +440,44 @@ def main() -> int:
     except ImportError:
         pass
     try:
+        import models.FactFormer  # noqa: F401
+    except ImportError:
+        pass
+    try:
         import models.my_model  # noqa: F401
     except ImportError:
         pass
 
+    all_models = available_models()
+
     if args.list_models:
-        print("Registered models:", available_models() or "<none>")
+        print("Registered models:", all_models or "<none>")
         return 0
 
+    if args.list_passing:
+        passing = []
+        for name in all_models:
+            # Suppress output during individual test runs
+            import sys
+            from io import StringIO
+            old_stdout = sys.stdout
+            sys.stdout = StringIO()
+            try:
+                result = run_smoke_test(name)
+                sys.stdout = old_stdout
+                if result == 0:
+                    passing.append(name)
+            except SystemExit as e:
+                sys.stdout = old_stdout
+                if e.code == 0:
+                    passing.append(name)
+            except Exception:
+                sys.stdout = old_stdout
+        print("Models passing smoke test:", passing or "<none>")
+        return 0 if passing else 1
+
     if not args.model:
-        raise SystemExit("[test_models] --model is required (or pass --list-models).")
+        raise SystemExit("[test_models] --model is required (or pass --list-models / --list-passing).")
 
     # Override module-level constant for this run if the user asked for a
     # different channel count. We do this by mutating the module attr, which
