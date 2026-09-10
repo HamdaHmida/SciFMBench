@@ -8,20 +8,6 @@ behind a single interface so they can be trained, finetuned, and evaluated on
 equal footing — apples-to-apples.
 
 ## Design at a glance
-
-```
-┌─────────────────────────────────────────────────────────┐
-│  Engine / CLI      train | finetune | test              │  ← you run this
-├─────────────────────────────────────────────────────────┤
-│  Benchmark layer   shared splits, normalization,        │  ← fair comparison
-│                   canonical metrics                     │
-├─────────────────────────────────────────────────────────┤
-│  Adapter (per model)  thin wrapper, no upstream edits   │  ← the protocol
-├─────────────────────────────────────────────────────────┤
-│  Vendored model    MPP, FNO, DeepONet, ... (untouched)  │
-└─────────────────────────────────────────────────────────┘
-```
-
 **Core idea — the adapter pattern.**
 
 Each model ships in `models/<name>/` with two files:
@@ -33,7 +19,7 @@ The framework never touches upstream code. When the original repo updates, you
 bump a pin and the adapter either still works or needs a small update. No forks
 to maintain.
 
-**Native training, canonical evaluation (Option C).**
+**Native training, canonical evaluation.**
 
 - **Training** is delegated to each model's native loop — each model trains the
   way its authors designed. The framework doesn't impose optimizer, scheduler,
@@ -67,7 +53,7 @@ native `(T, B, C, Nx, Ny)` becomes `(B, Nx, Ny, T, C)` via
 
 ```bash
 # 1. Clone
-git clone <this-repo> && cd SciFMBench
+git clone https://github.com/HamdaHmida/SciFMBench.git && cd SciFMBench
 
 # 2. (Recommended) create a fresh environment
 python3 -m venv .venv && source .venv/bin/activate
@@ -94,29 +80,29 @@ python3 -m engine.run --list-models
 
 ```bash
 python3 -m engine.run \
-    --model MPP \
+    --model <modelname> \
     --mode train \
-    --config configs/models/mpp_avit_s_config.yaml
+    --config configs/models/model_config.yaml
 ```
 
 ### Finetune (uses `finetune` section; loads `pretrained_ckpt_path`)
 
 ```bash
 python3 -m engine.run \
-    --model MPP \
+    --model <modelname> \
     --mode finetune \
-    --config configs/models/mpp_avit_s_config.yaml \
-    --weights ../weights/mpp_finetune.pt
+    --config configs/models/model_config.yaml \
+    --weights ../weights/model_weights.pt
 ```
 
 ### Zero-shot eval
 
 ```bash
 python3 -m engine.run \
-    --model MPP \
+    --model <modelname> \
     --mode test \
-    --config configs/models/mpp_avit_s_config.yaml \
-    --weights ../weights/mpp_pretrained.tar
+    --config configs/models/model_config.yaml \
+    --weights ../weights/model_weights.pt
 ```
 
 ### Pick a config section explicitly
@@ -179,12 +165,8 @@ SciFMBench/
 │
 ├── models/                 # One folder per model
 │   ├── my_model/           #   adapter pattern scaffold (placeholder)
-│   └── MPP/                #   vendored Axial-ViT-for-PDE + thin adapter
-│       ├── avit.py         #     ← vendored, untouched
-│       ├── spatial_modules.py
-│       ├── time_modules.py
-│       ├── mixed_modules.py
-│       ├── shared_modules.py
+│   └── <modelname>/        #   vendored Axial-ViT-for-PDE + thin adapter
+│       ├── model.py         #   ← vendored, untouched
 │       └── adapter.py      #   ← the only file we author
 │
 ├── processing/             # Model-specific pre/post processors
