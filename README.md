@@ -2,6 +2,10 @@
 
 A unified benchmarking framework for **fluid-dynamics Scientific Foundation Models (SciFMs)**.
 
+<p align="center">
+  <img src="cover.png" alt="SciFMBench.">
+</p>
+
 Open-source SciFMs ship with weights and code, but each has its own data format,
 input modality, and pre/post-processing pipeline. SciFMBench wraps every model
 behind a single interface so they can be trained, finetuned, and evaluated on
