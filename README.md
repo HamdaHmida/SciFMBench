@@ -211,10 +211,10 @@ the upstream folder.
 | First adapter (MPP / Axial ViT for PDE) | ✅ done |
 | CLI training / eval script | ✅ done — supports train / finetune / test, MPP YAML format |
 | Smoke-test script (`engine/test_models.py`) | ✅ done |
-| Canonical Sample schema for fluid dynamics | ⏳ next |
+| Canonical Sample schema for fluid dynamics | ✅ done |
 | Real dataset loader (PDEBench paths from the config) | ⏳ pending |
-| Evaluation / benchmark layer (canonical eval) | ⏳ pending |
-| Full training runner (logging, checkpoints, AMP) | ⏳ pending |
+| Evaluation / benchmark layer (canonical eval) | ✅ done |
+| Add Different models with their adapters | ⏳ pending |
 
 Currently the framework ships with **synthetic data** so the wiring path can
 be smoke-tested without a real PDEBench install. To exercise the upstream
