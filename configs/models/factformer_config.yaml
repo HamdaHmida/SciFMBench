@@ -1,0 +1,59 @@
+basic_config: &basic_config
+  # Model settings (matching FABlock2D architecture - single factorized attention block)
+  # Note: The full FactFormer model has encoder/propagator/decoder.
+  # This adapter wraps only FABlock2D (one encoder layer).
+  # Pretrained weights from the full model are NOT directly compatible.
+  dim: 128          # input channel dim (matches encoder layer dim)
+  dim_head: 64      # attention head dim
+  latent_dim: 256   # pooled latent dim (dim * latent_multiplier)
+  heads: 8          # number of attention heads
+  dim_out: 128      # output channel dim
+  use_rope: false   # rotary positional encoding - DISABLED due to vendored bug with pos_dim=1
+  kernel_multiplier: 2
+  scaling_factor: 1.0
+
+  # Training settings
+  batch_size: 4
+  max_epochs: 100
+  learning_rate: 5e-4
+  weight_decay: 1e-5
+  gradient_checkpointing: false
+  drop_path: 0.1
+  grad_clip: 1.0
+
+  # Data settings
+  in_time_window: 10
+  out_time_window: 16
+  resolution: 128
+  in_dim: 1
+  out_dim: 1
+
+  # Pretrained weights (full model checkpoint - NOT compatible with FABlock2D adapter)
+  # pretrained_ckpt_path: '/home/hamda/PhD_Thesis/weights/FactFormer_checkpoint.pth'
+  pretrained: false
+  pretrained_ckpt_path: null
+
+  # Finetuning flags
+  freeze_encoder: false
+  freeze_propagator: false
+
+
+finetune: &finetune
+  <<: *basic_config
+  max_epochs: 50
+  pretrained: true
+  learning_rate: 1e-4
+  freeze_encoder: false
+  freeze_propagator: false
+
+
+frozen: &frozen
+  <<: *finetune
+  freeze_encoder: true
+  freeze_propagator: false
+
+
+less_frozen: &less_frozen
+  <<: *finetune
+  freeze_encoder: true
+  freeze_propagator: true

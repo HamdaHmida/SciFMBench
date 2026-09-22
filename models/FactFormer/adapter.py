@@ -237,7 +237,11 @@ class FactFormerAdapter(BaseModel):
                 f"No FactFormer weights at {path}. The vendored code ships no "
                 f"pretrained state_dict, so from-scratch is the default mode."
             )
-        state = torch.load(path, map_location="cpu")
+        # Use weights_only=False for older checkpoints that contain non-tensor objects
+        state = torch.load(path, map_location="cpu", weights_only=False)
+        # Handle checkpoint dict with 'model' key
+        if isinstance(state, dict) and 'model' in state:
+            state = state['model']
         missing, unexpected = self._native.load_state_dict(state, strict=strict)
         if not strict and (missing or unexpected):
             print(

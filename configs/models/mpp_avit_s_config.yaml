@@ -79,7 +79,7 @@ finetune: &finetune
   accum_grad: 1
   pretrained: !!bool True
   group: 'debugging'
-  pretrained_ckpt_path: '/B16-noNS/training_checkpoints/ckpt.tar'
+  pretrained_ckpt_path: '/home/hamda/PhD_Thesis/weights/MPP_AViT_S'
   train_data_paths: [
               ['../datasets/PDEBench/2D/CFD/2D_Train_Turb', 'compNS', 'M1.0'],
               ]
