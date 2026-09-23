@@ -1,0 +1,59 @@
+basic_config: &basic_config
+  # OFormer Autoencoder Configuration (memory-efficient version)
+  # Mesh-free autoencoder using SpatialEncoder2D + PointWiseDecoder2D
+
+  # Model dimensions
+  latent_dim: 128           # latent dimension
+  input_channels: 2         # input channels (u, v for Burgers)
+  output_channels: 2        # output channels
+  time_window: 10           # number of timesteps in window
+  resolution: 128           # spatial resolution (Nx = Ny)
+
+  # Encoder (SpatialEncoder2D)
+  encoder_dim: 256          # encoder embedding dimension
+  encoder_depth: 2          # encoder transformer depth
+  encoder_heads: 4          # encoder attention heads
+
+  # Decoder (PointWiseDecoder2D)
+  decoder_dim: 128          # decoder latent channels (matches latent_dim)
+  decoder_depth: 2          # decoder depth
+  decoder_propagator_depth: 2  # propagator depth
+  scale: 8                  # attention scale for Galerkin attention
+
+  # Training settings
+  batch_size: 1
+  max_epochs: 50
+  learning_rate: 1e-4
+  weight_decay: 1e-5
+  gradient_checkpointing: false
+  grad_clip: 1.0
+
+  # Data settings
+  in_time_window: 10
+  out_time_window: 10
+  in_dim: 2
+  out_dim: 2
+
+  # Finetuning flags (for future use)
+  freeze_encoder: false
+  freeze_decoder: false
+
+  # Device
+  device: "cuda"
+
+finetune: &finetune
+  <<: *basic_config
+  max_epochs: 50
+  learning_rate: 5e-5
+  freeze_encoder: false
+  freeze_decoder: false
+
+frozen: &frozen
+  <<: *finetune
+  freeze_encoder: true
+  freeze_decoder: false
+
+less_frozen: &less_frozen
+  <<: *finetune
+  freeze_encoder: true
+  freeze_decoder: true

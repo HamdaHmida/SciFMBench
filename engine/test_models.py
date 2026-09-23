@@ -87,6 +87,8 @@ _CANON_SHAPE_OVERRIDES: Dict[str, Dict[str, int]] = {
     # FactFormer uses factorized attention; default shape works fine
     # but we use smaller dims to keep the test fast.
     "FactFormer": {"B": 4, "Nx": 32, "Ny": 32, "T": 4, "C": 2},
+    # OFormer is mesh-free with coordinate attention; use smaller dims
+    "OFormer": {"B": 4, "Nx": 32, "Ny": 32, "T": 4, "C": 2},
 }
 
 
@@ -154,6 +156,20 @@ _DEFAULT_CFG: Dict[str, Dict[str, Any]] = {
         "use_rope": False,       # positional encoding: 'none'
         "kernel_multiplier": 3,
         "scaling_factor": 1.0,
+    },
+    "OFormer": {
+        # Small config for smoke test. Mesh-free autoencoder with SpatialEncoder2D + PointWiseDecoder2D
+        "latent_dim": 64,
+        "encoder_dim": 128,
+        "decoder_dim": 64,
+        "encoder_depth": 2,
+        "encoder_heads": 4,
+        "decoder_depth": 2,
+        "decoder_propagator_depth": 2,
+        "scale": 8,
+        "time_window": 4,   # must match _CANON_SHAPE_OVERRIDES["OFormer"]["T"]
+        "resolution": 32,   # must match _CANON_SHAPE_OVERRIDES["OFormer"]["Nx"]
+        "device": "cpu",    # smoke test on CPU
     },
     "my_model": {},  # the placeholder adapter is small enough that defaults suffice
 }
@@ -445,6 +461,10 @@ def main() -> int:
         pass
     try:
         import models.my_model  # noqa: F401
+    except ImportError:
+        pass
+    try:
+        import models.OFormer  # noqa: F401
     except ImportError:
         pass
 
