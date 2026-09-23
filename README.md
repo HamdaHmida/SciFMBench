@@ -99,15 +99,80 @@ python3 -m engine.run \
     --config configs/models/mpp_avit_s_config.yaml
 ```
 
-### Finetune (uses `finetune` section; loads `pretrained_ckpt_path`)
+### Finetune MPP (uses `finetune` section; loads `pretrained_ckpt_path` from YAML)
+
+The `engine/finetune_mpp.py` script supports both AViT-S and AViT-Ti configs with YAML variants:
 
 ```bash
-python3 -m engine.run \
-    --model MPP \
-    --mode finetune \
+# AViT-S (embed_dim=384, heads=6) - matches MPP_AViT_S weights
+python3 -m engine.finetune_mpp \
     --config configs/models/mpp_avit_s_config.yaml \
-    --weights ../weights/mpp_finetune.pt
+    --variant frozen \
+    --epochs 10 \
+    --lr 1e-4 \
+    --batch-size 1 \
+    --device cuda
+
+# AViT-Ti (embed_dim=192, heads=3) - matches MPP_AViT_Ti weights
+python3 -m engine.finetune_mpp \
+    --config configs/models/mpp_avit_ti_config.yaml \
+    --variant frozen \
+    --epochs 10 \
+    --lr 1e-4 \
+    --batch-size 1 \
+    --device cuda
 ```
+
+**Variants** (YAML anchors):
+- `basic_config` — default, no pretrained weights, no freezing
+- `finetune` — pretrained=true, all layers trainable
+- `frozen` — pretrained=true, encoder frozen, only projections trainable
+- `less_frozen` — pretrained=true, encoder + processor frozen
+
+**Override options:**
+```bash
+# Override weights path (CLI wins over YAML)
+python3 -m engine.finetune_mpp \
+    --config configs/models/mpp_avit_ti_config.yaml \
+    --variant frozen \
+    --weights /home/hamda/PhD_Thesis/weights/MPP_AViT_S \
+    --epochs 10 --lr 1e-4 --batch-size 1 --device cuda
+
+# Override output path
+python3 -m engine.finetune_mpp \
+    --config configs/models/mpp_avit_s_config.yaml \
+    --variant frozen \
+    --output /home/hamda/PhD_Thesis/weights/MPP_AViT_S_finetuned_burgers.pt \
+    --epochs 10 --lr 1e-4 --batch-size 1 --device cuda
+
+# Full finetune (override freeze)
+python3 -m engine.finetune_mpp \
+    --config configs/models/mpp_avit_s_config.yaml \
+    --variant frozen \
+    --unfreeze \
+    --epochs 10 --lr 1e-4 --batch-size 1 --device cuda
+```
+
+### Finetune FactFormer (single FABlock2D layer)
+
+```bash
+# Train from scratch (pretrained weights are for full encoder+propagator, not compatible with single FABlock2D)
+python3 -m engine.finetune_factformer \
+    --config configs/models/factformer_config.yaml \
+    --variant frozen \
+    --epochs 10 \
+    --lr 1e-4 \
+    --batch-size 1 \
+    --device cuda
+```
+
+**Variants:**
+- `basic_config` — default, from scratch
+- `finetune` — from scratch, all layers trainable
+- `frozen` — from scratch, encoder frozen, only output projection trainable
+- `less_frozen` — from scratch, encoder frozen (same as frozen for single block)
+
+> **Note:** The `FactFormer_checkpoint.pth` in `weights/` is for the **full FactFormer model** (4 encoder layers + propagator + decoder). Our adapter wraps only a **single FABlock2D** (one encoder layer). These are NOT directly compatible — training from scratch is the default. The `pretrained_ckpt_path` in the YAML is commented out to reflect this.
 
 ### Zero-shot eval
 
