@@ -7,8 +7,13 @@ This script:
 4. Configures finetuning: freeze encoder/propagator
 5. Runs native training loop
 
+The number of state channels C is set with --n-channels (default 2). The
+FABlock2D is built from scratch with dim = dim_out = C, so the same script
+handles Burgers (C=2, u/v) and 3-channel cases such as NS (C=3, u/v/p).
+
 Usage:
     python3 -m engine.finetune_factformer --config configs/models/factformer_config.yaml --variant frozen --epochs 10 --lr 1e-4 --batch-size 1 --device cuda
+    python3 -m engine.finetune_factformer --config configs/models/factformer_config.yaml --variant frozen --n-channels 3 --epochs 10 --lr 1e-4 --batch-size 1 --device cuda
 """
 from __future__ import annotations
 
@@ -93,33 +98,6 @@ def nrmse(pred, target, eps=1e-8):
     return torch.sqrt(mse / (norm + eps))
 
 
-def _adapt_factformer_to_n_channels(native_model, n_channels: int):
-    """Adapt FactFormer model from original channels to n_channels by slicing projections.
-
-    The pretrained FactFormer model has:
-    - to_in: Linear(10, 128) - input projection (assuming 10 input channels)
-    - simple_to_out: final output projection
-
-    We adapt the input projection to accept n_channels.
-    """
-    import torch.nn as nn
-
-    # --- Adapt input projection (to_in) ---
-    if hasattr(native_model, 'to_in'):
-        old_to_in = native_model.to_in
-        new_to_in = nn.Linear(n_channels, old_to_in.out_features, bias=old_to_in.bias is not None)
-        with torch.no_grad():
-            # Copy weights for first n_channels
-            new_to_in.weight[:, :n_channels] = old_to_in.weight[:, :n_channels]
-            if old_to_in.bias is not None:
-                new_to_in.bias[:] = old_to_in.bias[:]
-        native_model.to_in = new_to_in
-        print(f"  Adapted to_in: {old_to_in.in_features} -> {n_channels} channels")
-
-    # Note: The output channels are handled by dim_out in FABlock2D
-    # which is already set correctly in the adapter config
-
-
 def _collate_fn(batch, T_window: int = 10):
     """Collate function for DataLoader to produce (window, target) in native layout.
 
@@ -160,6 +138,7 @@ def main():
     p.add_argument("--T-window", type=int, default=10, help="Time window length for training (should match pretrained in_time_window)")
     p.add_argument("--finish-sample", type=int, default=10, help="Max samples per file (default small for memory)")
     p.add_argument("--data-file", type=int, choices=[0, 1], default=0, help="Which data file to use: 0=nu_0.1, 1=nu_0.01")
+    p.add_argument("--n-channels", type=int, default=2, help="Number of physical state channels C in the data (2 = Burgers (u,v), 3 = NS (u,v,p)). Sets FABlock2D dim/dim_out.")
     p.add_argument("--freeze-encoder", action="store_true", help="Freeze encoder (overrides config)")
     p.add_argument("--freeze-propagator", action="store_true", help="Freeze propagator (overrides config)")
     p.add_argument("--unfreeze", action="store_true", help="Unfreeze all (full finetune, overrides config)")
@@ -202,13 +181,13 @@ def main():
             "pretrained_ckpt_path": None,
         }
 
-    # Override dim to match Burgers (2 channels: u, v)
-    # The FABlock2D's dim must match input channels
-    ff_config["dim"] = 2
-    ff_config["dim_out"] = 2  # Predict 2 channels
+    # FABlock2D's `dim` is the input channel count and `dim_out` the output
+    # channel count, so both must equal the data's C.
+    ff_config["dim"] = args.n_channels
+    ff_config["dim_out"] = args.n_channels  # Predict the same C channels
 
     print("=" * 60)
-    print("FactFormer Finetuning on Burgers Equation")
+    print(f"FactFormer Finetuning ({args.n_channels} channels)")
     print("=" * 60)
     print(f"Config: {args.config or 'default FactFormer'}")
     print(f"Variant: {args.variant}")
@@ -217,6 +196,7 @@ def main():
     print(f"LR: {args.lr}")
     print(f"Batch size: {args.batch_size}")
     print(f"T-window: {args.T_window}")
+    print(f"Channels (C): {args.n_channels}")
     print(f"Model: dim={ff_config['dim']}, heads={ff_config['heads']}, dim_head={ff_config['dim_head']}, latent_dim={ff_config['latent_dim']}, dim_out={ff_config['dim_out']}")
     print(f"Finetuning: freeze_encoder={ff_config.get('freeze_encoder', False)}, freeze_propagator={ff_config.get('freeze_propagator', False)}")
     print()
@@ -225,7 +205,7 @@ def main():
     print("Building FactFormer model...")
     # Add canonical shape overrides for smoke test compatibility
     ff_config["_T"] = args.T_window
-    ff_config["_C"] = 2  # Burgers has 2 channels (u, v)
+    ff_config["_C"] = args.n_channels
     ff_config["_Nx"] = 128
     ff_config["_Ny"] = 128
 
@@ -249,10 +229,13 @@ def main():
     else:
         print("\nNo pretrained weights specified - training from scratch.")
 
-    # --- 3. Adapt model to 2 channels (Burgers) ---
-    print("\nAdapting model to 2 channels (Burgers)...")
-    _adapt_factformer_to_n_channels(model.native_model, n_channels=2)
-    print("  Model adapted to 2 channels")
+    # --- 3. Channels ---
+    # No adaptation needed: the block is built from scratch with
+    # dim = dim_out = n_channels, so its projections already match C.
+    # (The old `_adapt_factformer_to_n_channels` helper only rewired the
+    # block-level `to_in`, never the `PoolingReducer.to_in` layers inside
+    # `to_x`/`to_y`, and produced a Linear(n_channels, dim) that broke C != 2.)
+    print(f"\nModel built from scratch with C={args.n_channels} (no channel adaptation)")
 
     # --- 4. Configure finetuning ---
     print("\nConfiguring finetuning...")
@@ -361,7 +344,7 @@ def main():
     print("Training complete!")
 
     # --- 7. Save finetuned weights ---
-    output_path = args.output or Path("/home/hamda/PhD_Thesis/weights/FactFormer_finetuned_burgers.pt")
+    output_path = args.output or Path(f"/home/hamda/PhD_Thesis/weights/FactFormer_finetuned_C{args.n_channels}.pt")
     model.save_weights(output_path)
     print(f"\nSaved finetuned weights to {output_path}")
 
